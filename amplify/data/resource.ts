@@ -8,10 +8,23 @@ specifies that any user authenticated via an API key can "create", "read",
 =========================================================================*/
 const schema = a.schema({
   Todo: a
-    .model({
-      content: a.string(),
-    })
-    .authorization((allow) => [allow.publicApiKey()]),
+      .model({
+        content: a.string(),
+        done: a.boolean(),
+        priority: a.enum(["low", "medium", "high"]),
+      })
+      .authorization((allow) => [allow.publicApiKey()]),
+
+    searchTodos: a
+        .query()
+        .returns(a.ref("Todo").array())
+        .authorization((allow) => [allow.publicApiKey()])
+        .handler(
+            a.handler.custom({
+                entry: "./searchTodoResolver.js",
+                dataSource: "osDataSource",
+            })
+        ),
 });
 
 export type Schema = ClientSchema<typeof schema>;
