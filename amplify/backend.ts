@@ -62,13 +62,6 @@ const openSearchDomain = new opensearch.Domain(
     }
 );
 
-// Add OpenSearch data source
-const osDataSource = backend.data.addOpenSearchDataSource(
-    "osDataSource",
-    openSearchDomain
-);
-
-
 
 // Get the S3Bucket ARN
 const s3BucketArn = backend.storage.resources.bucket.bucketArn;
@@ -223,4 +216,10 @@ const cfnPipeline = new osis.CfnPipeline(
             },
         },
     }
+);
+
+// Add OpenSearch data source
+const osDataSource = backend.data.addOpenSearchDataSource(
+    "osDataSource",
+    openSearchDomain
 );
