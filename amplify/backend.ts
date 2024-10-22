@@ -1,20 +1,14 @@
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import * as opensearch from 'aws-cdk-lib/aws-opensearchservice';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import * as iam from "aws-cdk-lib/aws-iam";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import * as osis from "aws-cdk-lib/aws-osis";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import * as logs from "aws-cdk-lib/aws-logs";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+// @ts-ignore
 import { RemovalPolicy, Stack } from "aws-cdk-lib";
 import {defineBackend} from '@aws-amplify/backend';
 import {auth} from './auth/resource';
