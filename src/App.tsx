@@ -8,6 +8,12 @@ function App() {
     const [todos, setTodos] = useState<Array<Schema["Todo"]["type"]>>([]);
 
     useEffect(() => {
+        console.log(client.queries)
+
+        client.queries.searchTodos().then(res => {
+            console.log(res);
+        })
+
         client.models.Todo.observeQuery().subscribe({
             next: (data) => setTodos([...data.items]),
         });

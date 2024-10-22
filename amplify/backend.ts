@@ -15,8 +15,7 @@ import * as osis from "aws-cdk-lib/aws-osis";
 import * as logs from "aws-cdk-lib/aws-logs";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error
-import { RemovalPolicy } from "aws-cdk-lib";
-
+import { RemovalPolicy, Stack } from "aws-cdk-lib";
 import {defineBackend} from '@aws-amplify/backend';
 import {auth} from './auth/resource';
 import {data} from './data/resource';
@@ -47,7 +46,7 @@ const tableArn = backend.data.resources.tables['Todo'].tableArn;
 // Get the DynamoDB table name
 const tableName = backend.data.resources.tables['Todo'].tableName;
 
-const stack = backend.createStack("open-search-stack")
+const stack = Stack.of(backend.data);
 
 // Create the OpenSearch domain
 const openSearchDomain = new opensearch.Domain(
@@ -195,7 +194,7 @@ dynamodb-pipeline:
 
 // Create a CloudWatch log group
 const logGroup = new logs.LogGroup(stack, "LogGroup", {
-    logGroupName: "/aws/vendedlogs/OpenSearchService/pipelines/1",
+    logGroupName: "/aws/vendedlogs/OpenSearchService/pipelines/2",
     removalPolicy: RemovalPolicy.DESTROY,
 });
 
@@ -208,7 +207,7 @@ const cfnPipeline = new osis.CfnPipeline(
         maxUnits: 4,
         minUnits: 1,
         pipelineConfigurationBody: openSearchTemplate,
-        pipelineName: "dynamodb-integration-2",
+        pipelineName: "dynamodb-integration-1",
         logPublishingOptions: {
             isLoggingEnabled: true,
             cloudWatchLogDestination: {
