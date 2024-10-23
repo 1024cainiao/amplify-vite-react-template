@@ -8,7 +8,7 @@ import {util} from "@aws-appsync/utils";
 export function request(ctx) {
     return {
         operation: "GET",
-        path: "/todo/_search",
+        path: "/person/_search",
         params: {
             body: {
                 from: ctx.args.from,
@@ -17,10 +17,10 @@ export function request(ctx) {
                     bool: {
                         must: [
                             {
-                                term: {content: ctx.args.content}
+                                term: {name: ctx.args.name}
                             },
                             {
-                                term: {done: ctx.args.done}
+                                term: {age: ctx.args.age}
                             }
                         ]
                     }

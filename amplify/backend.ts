@@ -9,7 +9,7 @@ import * as osis from "aws-cdk-lib/aws-osis";
 // @ts-ignore
 import * as logs from "aws-cdk-lib/aws-logs";
 // @ts-ignore
-import { RemovalPolicy, Stack } from "aws-cdk-lib";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {defineBackend} from '@aws-amplify/backend';
 import {auth} from './auth/resource';
 import {data} from './data/resource';
@@ -35,10 +35,23 @@ todoTable.streamSpecification = {
 };
 
 
+const personTable =
+    backend.data.resources.cfnResources.amplifyDynamoDbTables['Person']
+
+personTable.pointInTimeRecoveryEnabled = true;
+
+personTable.streamSpecification = {
+    streamViewType: dynamodb.StreamViewType.NEW_IMAGE
+};
+
+
 // Get the DynamoDB table ARN
 const tableArn = backend.data.resources.tables['Todo'].tableArn;
 // Get the DynamoDB table name
 const tableName = backend.data.resources.tables['Todo'].tableName;
+
+const personTableArn = backend.data.resources.tables['Person'].tableArn
+const personTableName = backend.data.resources.tables['Person'].tableName;
 
 const stack = Stack.of(backend.data);
 
@@ -108,7 +121,7 @@ const openSearchIntegrationPipelineRole = new iam.Role(
                             "dynamodb:GetRecords",
                             "dynamodb:GetShardIterator",
                         ],
-                        resources: [tableArn, tableArn + "/*"],
+                        resources: [tableArn, tableArn + "/*", personTableArn, personTableArn + "/*"],
                     }),
                 ],
             }),
@@ -146,9 +159,6 @@ const indexMapping = {
     },
 };
 
-
-
-
 // OpenSearch template definition
 const openSearchTemplate = `
 version: "2"
@@ -185,6 +195,63 @@ dynamodb-pipeline:
           region: "${stack.region}"
 `;
 
+const personIndexName = "person"
+
+const personIndexMapping = {
+    settings: {
+        number_of_shards: 1,
+        number_of_replicas: 0,
+    },
+    mappings: {
+        properties: {
+            id: {
+                type: "keyword",
+            },
+            name: {
+                type: "text",
+            },
+            age: {
+                type: "integer"
+            }
+        },
+    },
+}
+
+const personOpenSearchTemplate = `
+version: "2"
+dynamodb-pipeline:
+  source:
+    dynamodb:
+      acknowledgments: true
+      tables:
+        - table_arn: "${personTableArn}"
+          stream:
+            start_position: "LATEST"
+          export:
+            s3_bucket: "${s3BucketName}"
+            s3_region: "${stack.region}"
+            s3_prefix: "${personTableName}/"
+      aws:
+        sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+        region: "${stack.region}"
+  sink:
+    - opensearch:
+        hosts:
+          - "https://${openSearchDomain.domainEndpoint}"
+        index: "${personIndexName}"
+        index_type: "custom"
+        template_content: |
+          ${JSON.stringify(personIndexMapping)}
+        document_id: '\${getMetadata("primary_key")}'
+        action: '\${getMetadata("opensearch_action")}'
+        document_version: '\${getMetadata("document_version")}'
+        document_version_type: "external"
+        bulk_size: 4
+        aws:
+          sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+          region: "${stack.region}"
+`;
+
 
 // Create a CloudWatch log group
 const logGroup = new logs.LogGroup(stack, "LogGroup", {
@@ -202,6 +269,23 @@ const cfnPipeline = new osis.CfnPipeline(
         minUnits: 1,
         pipelineConfigurationBody: openSearchTemplate,
         pipelineName: "dynamodb-integration-1",
+        logPublishingOptions: {
+            isLoggingEnabled: true,
+            cloudWatchLogDestination: {
+                logGroup: logGroup.logGroupName,
+            },
+        },
+    }
+);
+
+const personCfnPipeline = new osis.CfnPipeline(
+    stack,
+    "PersonOpenSearchIntegrationPipeline",
+    {
+        maxUnits: 4,
+        minUnits: 1,
+        pipelineConfigurationBody: personOpenSearchTemplate,
+        pipelineName: "dynamodb-integration-2",
         logPublishingOptions: {
             isLoggingEnabled: true,
             cloudWatchLogDestination: {

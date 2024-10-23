@@ -6,17 +6,20 @@ const client = generateClient<Schema>();
 
 function App() {
     const [todos, setTodos] = useState<Array<Schema["Todo"]["type"]>>([]);
+    const [persons, setPersons] = useState<Array<Schema["Person"]["type"]>>([])
 
     useEffect(() => {
-        console.log(client.queries)
-
-        client.queries.searchTodos().then(res => {
+        client.queries.searchTodos({from: 0, size: 50, content: "3", done: false}).then(res => {
             console.log(res);
         })
 
         client.models.Todo.observeQuery().subscribe({
             next: (data) => setTodos([...data.items]),
         });
+
+        client.models.Person.observeQuery().subscribe({
+            next: (data) => setPersons([...data.items])
+        })
     }, []);
 
     const priorityArray = ["low", "medium", "high"];
@@ -29,13 +32,27 @@ function App() {
         });
     }
 
+    function createPerson() {
+        client.models.Person.create({
+            name: window.prompt("Person name") ?? "匿名",
+            age: Math.round(Math.random() * 10)
+        });
+    }
+
     return (
         <main>
             <h1>My todos</h1>
-            <button onClick={createTodo}>+ new</button>
+            <button onClick={createTodo}>+ new todo</button>
             <ul>
                 {todos.map((todo) => (
                     <li key={todo.id}>{`${todo.content} | ${todo.done} | ${todo.priority}`}</li>
+                ))}
+            </ul>
+            <br/>
+            <button onClick={createPerson}>+ new person</button>
+            <ul>
+                {persons.map((person) => (
+                    <li key={person.id}>{`${person.name} | ${person.age}`}</li>
                 ))}
             </ul>
             <div>

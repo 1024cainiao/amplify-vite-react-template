@@ -15,13 +15,43 @@ const schema = a.schema({
         })
         .authorization((allow) => [allow.publicApiKey()]),
 
+    Person: a
+        .model({
+            name: a.string().required(),
+            age: a.integer().required()
+        })
+        .authorization((allow) => [allow.publicApiKey()]),
+
     searchTodos: a
         .query()
+        .arguments({
+            from: a.integer().required(),
+            size: a.integer().required(),
+            content: a.string().required(),
+            done: a.boolean().required(),
+        })
         .returns(a.ref("Todo").array())
         .authorization((allow) => [allow.publicApiKey()])
         .handler(
             a.handler.custom({
                 entry: "./searchTodoResolver.js",
+                dataSource: "osDataSource",
+            })
+        ),
+
+    searchPersons: a
+        .query()
+        .arguments({
+            from: a.integer().required(),
+            size: a.integer().required(),
+            name: a.string().required(),
+            age: a.integer().required(),
+        })
+        .returns(a.ref("Person").array())
+        .authorization((allow) => [allow.publicApiKey()])
+        .handler(
+            a.handler.custom({
+                entry: "./searchPersonResolver.js",
                 dataSource: "osDataSource",
             })
         ),
