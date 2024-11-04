@@ -14,6 +14,9 @@ import {defineBackend} from '@aws-amplify/backend';
 import {auth} from './auth/resource';
 import {data} from './data/resource';
 import {storage} from "./storage/resource";
+import {TodosQueriesApi} from "./custom/todos-query/resource";
+import {USER_POOL_GROUP_ADMINS} from "./constant";
+import {UserPool} from "aws-cdk-lib/aws-cognito";
 
 const backend = defineBackend({
     auth,
@@ -64,7 +67,7 @@ const openSearchDomain = new opensearch.Domain(
         nodeToNodeEncryption: true,
         encryptionAtRest: {
             enabled: true
-        }
+        },
     }
 );
 
@@ -300,3 +303,29 @@ const osDataSource = backend.data.addOpenSearchDataSource(
     "osDataSource",
     openSearchDomain
 );
+
+
+// create the admin queries
+const todoQueriesName = 'todoQueries';
+const todoQueriesStack = backend.createStack(todoQueriesName);
+const todosApi = new TodosQueriesApi(todoQueriesStack, todoQueriesName, {
+    esArn: openSearchDomain.domainArn,
+    userPoolClients: [backend.auth.resources.userPoolClient],
+    allowGroups: [USER_POOL_GROUP_ADMINS],
+});
+
+backend.addOutput({
+    custom: {
+        API: {
+            [todoQueriesName]: {
+                endpoint: todosApi.url,
+            },
+        },
+        es: {
+            endpoint: openSearchDomain.domainEndpoint,
+            arn: openSearchDomain.domainArn
+        }
+    }
+})
+
+
