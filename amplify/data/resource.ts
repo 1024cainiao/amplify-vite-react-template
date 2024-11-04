@@ -30,7 +30,8 @@ const schema = a.schema({
             content: a.string().required(),
             done: a.boolean().required(),
         })
-        .returns(a.ref("Todo").array())
+        // .returns(a.ref("Todo").array())
+        .returns(a.string())
         .authorization((allow) => [allow.publicApiKey()])
         .handler(
             a.handler.custom({
@@ -47,7 +48,8 @@ const schema = a.schema({
             name: a.string().required(),
             age: a.integer().required(),
         })
-        .returns(a.ref("Person").array())
+        // .returns(a.ref("Person").array())
+        .returns(a.string())
         .authorization((allow) => [allow.publicApiKey()])
         .handler(
             a.handler.custom({

@@ -40,5 +40,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     const list = ctx.result.hits.hits.map((hit) => hit._source);
-    return list;
+    const total = ctx.result.hits.total;
+    const result = {list, total}
+    return JSON.stringify(result);
 }

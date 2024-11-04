@@ -2,20 +2,6 @@ import {useEffect, useState} from "react";
 import type {Schema} from "../amplify/data/resource";
 import {generateClient} from "aws-amplify/data";
 
-// // @ts-ignore
-// import {Client} from '@opensearch-project/opensearch'
-// // @ts-ignore
-// import {AwsSigv4Signer} from '@opensearch-project/opensearch/aws'
-//
-// const openSearchClient = new Client({
-//     ...AwsSigv4Signer({
-//         region: 'us-west-2',
-//         service: 'es',
-//     }),
-//     node: 'https://search-opensearchdomai-ep540pn3zg5n-qfacmrryqgsjsnvrvdi56isrne.ap-northeast-1.es.amazonaws.com', // OpenSearch domain URL
-// });
-
-
 const client = generateClient<Schema>();
 
 function App() {
@@ -24,7 +10,7 @@ function App() {
 
     useEffect(() => {
         client.queries.searchTodos({from: 0, size: 50, content: "3", done: false}).then(res => {
-            console.log(res);
+            console.log(res.data?JSON.parse(res.data):'');
         })
 
         client.models.Todo.observeQuery().subscribe({
@@ -37,11 +23,6 @@ function App() {
 
 
     }, []);
-
-    // const test = async ()=>{
-    //     const  res = await openSearchClient.cat.health();
-    //     res.body
-    // }
 
     const priorityArray = ["low", "medium", "high"];
 

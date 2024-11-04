@@ -39,6 +39,8 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result.hits.hits.map((hit) => hit._source);
-    // return ctx.result;
+    const list = ctx.result.hits.hits.map((hit) => hit._source);
+    const total = ctx.result.hits.total;
+    const result = {list, total}
+    return JSON.stringify(result);
 }
