@@ -16,7 +16,6 @@ import {data} from './data/resource';
 import {storage} from "./storage/resource";
 import {TodosQueriesApi} from "./custom/todos-query/resource";
 import {USER_POOL_GROUP_ADMINS} from "./constant";
-import {UserPool} from "aws-cdk-lib/aws-cognito";
 
 const backend = defineBackend({
     auth,
@@ -55,6 +54,9 @@ const tableName = backend.data.resources.tables['Todo'].tableName;
 
 const personTableArn = backend.data.resources.tables['Person'].tableArn
 const personTableName = backend.data.resources.tables['Person'].tableName;
+
+const studentTableArn = backend.data.resources.tables['Student'].tableArn;
+const studentTableName = backend.data.resources.tables['Student'].tableName;
 
 const stack = Stack.of(backend.data);
 
@@ -124,7 +126,7 @@ const openSearchIntegrationPipelineRole = new iam.Role(
                             "dynamodb:GetRecords",
                             "dynamodb:GetShardIterator",
                         ],
-                        resources: [tableArn, tableArn + "/*", personTableArn, personTableArn + "/*"],
+                        resources: [tableArn, tableArn + "/*", personTableArn, personTableArn + "/*", studentTableArn, studentTableArn+"/*"],
                     }),
                 ],
             }),
@@ -255,6 +257,63 @@ dynamodb-pipeline:
           region: "${stack.region}"
 `;
 
+const studentIndexName = "student"
+
+const studentIndexMapping = {
+    settings: {
+        number_of_shards: 1,
+        number_of_replicas: 0,
+    },
+    mappings: {
+        properties: {
+            id: {
+                type: "keyword",
+            },
+            name: {
+                type: "text",
+            },
+            age: {
+                type: "integer"
+            }
+        },
+    },
+}
+
+const studentOpenSearchTemplate = `
+version: "2"
+dynamodb-pipeline:
+  source:
+    dynamodb:
+      acknowledgments: true
+      tables:
+        - table_arn: "${studentTableArn}"
+          stream:
+            start_position: "LATEST"
+          export:
+            s3_bucket: "${s3BucketName}"
+            s3_region: "${stack.region}"
+            s3_prefix: "${studentTableName}/"
+      aws:
+        sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+        region: "${stack.region}"
+  sink:
+    - opensearch:
+        hosts:
+          - "https://${openSearchDomain.domainEndpoint}"
+        index: "${studentIndexName}"
+        index_type: "custom"
+        template_content: |
+          ${JSON.stringify(studentIndexMapping)}
+        document_id: '\${getMetadata("primary_key")}'
+        action: '\${getMetadata("opensearch_action")}'
+        document_version: '\${getMetadata("document_version")}'
+        document_version_type: "external"
+        bulk_size: 4
+        aws:
+          sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+          region: "${stack.region}"
+`;
+
 
 // Create a CloudWatch log group
 const logGroup = new logs.LogGroup(stack, "LogGroup", {
@@ -289,6 +348,23 @@ const personCfnPipeline = new osis.CfnPipeline(
         minUnits: 1,
         pipelineConfigurationBody: personOpenSearchTemplate,
         pipelineName: "dynamodb-integration-2",
+        logPublishingOptions: {
+            isLoggingEnabled: true,
+            cloudWatchLogDestination: {
+                logGroup: logGroup.logGroupName,
+            },
+        },
+    }
+);
+
+const studentCfnPipeline = new osis.CfnPipeline(
+    stack,
+    "studentOpenSearchIntegrationPipeline",
+    {
+        maxUnits: 4,
+        minUnits: 1,
+        pipelineConfigurationBody: studentOpenSearchTemplate,
+        pipelineName: "dynamodb-integration-3",
         logPublishingOptions: {
             isLoggingEnabled: true,
             cloudWatchLogDestination: {

@@ -22,6 +22,13 @@ const schema = a.schema({
         })
         .authorization((allow) => [allow.publicApiKey()]),
 
+    Student: a
+        .model({
+            name: a.string().required(),
+            age: a.integer().required()
+        })
+        .authorization((allow) => [allow.publicApiKey()]),
+
     searchTodos: a
         .query()
         .arguments({
@@ -54,6 +61,24 @@ const schema = a.schema({
         .handler(
             a.handler.custom({
                 entry: "./searchPersonResolver.js",
+                dataSource: "osDataSource",
+            })
+        ),
+
+    searchStudent: a
+        .query()
+        .arguments({
+            from: a.integer().required(),
+            size: a.integer().required(),
+            name: a.string().required(),
+            age: a.integer().required(),
+        })
+        // .returns(a.ref("Person").array())
+        .returns(a.string())
+        .authorization((allow) => [allow.publicApiKey()])
+        .handler(
+            a.handler.custom({
+                entry: "./searchStudentResolver.js",
                 dataSource: "osDataSource",
             })
         ),
