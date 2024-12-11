@@ -1,53 +1,71 @@
-import {Construct} from 'constructs';
+import { Construct } from 'constructs';
 import * as url from 'node:url';
-import * as cognito from 'aws-cdk-lib/aws-cognito';
-import {UserPool} from 'aws-cdk-lib/aws-cognito';
+import { UserPool } from 'aws-cdk-lib/aws-cognito';
 import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import {HttpLambdaIntegration} from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import {Runtime} from 'aws-cdk-lib/aws-lambda';
-import {PROJECT_NAME} from '../../constant';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import * as authorizers from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { PROJECT_NAME } from '../../constant';
 
-type TodosQueriesApiPros = {
-	esArn: string;
+type AdminQueriesApiPros = {
+	userPool: UserPool;
 	userPoolClients?: cognito.IUserPoolClient[];
 	allowGroups: string[];
 	cors?: apigwv2.CorsPreflightOptions;
 };
 
-export class TodosQueriesApi extends Construct {
+export class AdminQueriesApi extends Construct {
 	public readonly url: string;
 	public readonly api: apigwv2.HttpApi;
 	public readonly handler: lambda.NodejsFunction;
 
-	constructor(scope: Construct, id: string, props: TodosQueriesApiPros) {
+	constructor(scope: Construct, id: string, props: AdminQueriesApiPros) {
 		super(scope, id);
 
 		// 创建 Lambda 函数
-		const handler = new lambda.NodejsFunction(this, `${PROJECT_NAME}TodosQueries`, {
+		const handler = new lambda.NodejsFunction(this, `${PROJECT_NAME}AdminQueries`, {
 			runtime: Runtime.NODEJS_20_X,
 			entry: url.fileURLToPath(new URL('api-handler/handler.ts', import.meta.url)),
-			environment:{
-				ES_HOST:''
-			}
+			environment: {
+				COGNITO_USER_POOL_ID: props.userPool.userPoolId,
+				ALLOWED_GROUPS: JSON.stringify(props.allowGroups),
+			},
 		});
 
 		handler.addToRolePolicy(
 			new iam.PolicyStatement({
-				actions: ["es:ESHttp*"],
-				resources: [`${props.esArn}/*`],
+				actions: [
+					'cognito-idp:AdminCreateUser',
+					'cognito-idp:ListUsersInGroup',
+					'cognito-idp:AdminUserGlobalSignOut',
+					'cognito-idp:AdminEnableUser',
+					'cognito-idp:AdminDisableUser',
+					'cognito-idp:AdminRemoveUserFromGroup',
+					'cognito-idp:AdminAddUserToGroup',
+					'cognito-idp:AdminListGroupsForUser',
+					'cognito-idp:AdminGetUser',
+					'cognito-idp:AdminConfirmSignUp',
+					'cognito-idp:ListUsers',
+					'cognito-idp:ListGroups',
+					'cognito-idp:AdminDeleteUser',
+					'cognito-idp:AdminUpdateUserAttributes',
+					'cognito-idp:AdminDeleteUserAttributes',
+				],
+				resources: [props.userPool.userPoolArn],
 			})
 		);
 
 		const integration = new HttpLambdaIntegration('Integration', handler);
 
 		const api = new apigwv2.HttpApi(this, `${PROJECT_NAME}HttpApi`, {
-			apiName: `${PROJECT_NAME}TodosQueries`,
-			// defaultAuthorizer: new authorizers.HttpUserPoolAuthorizer('Authorizer', props.userPool, {
-			// 	userPoolClients: props.userPoolClients,
-			// 	identitySource: ['$request.header.Authorization'],
-			// }),
+			apiName: `${PROJECT_NAME}AdminQueries`,
+			defaultAuthorizer: new authorizers.HttpUserPoolAuthorizer('Authorizer', props.userPool, {
+				userPoolClients: props.userPoolClients,
+				identitySource: ['$request.header.Authorization'],
+			}),
 			defaultIntegration: integration,
 			corsPreflight: {
 				allowOrigins: ['*'],

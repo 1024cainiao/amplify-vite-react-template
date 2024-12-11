@@ -1,407 +1,280 @@
-// @ts-ignore
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-// @ts-ignore
-import * as opensearch from 'aws-cdk-lib/aws-opensearchservice';
-// @ts-ignore
-import * as iam from "aws-cdk-lib/aws-iam";
-// @ts-ignore
-import * as osis from "aws-cdk-lib/aws-osis";
-// @ts-ignore
-import * as logs from "aws-cdk-lib/aws-logs";
-// @ts-ignore
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {defineBackend} from '@aws-amplify/backend';
-import {auth} from './auth/resource';
-import {data} from './data/resource';
-import {storage} from "./storage/resource";
-import {TodosQueriesApi} from "./custom/todos-query/resource";
-import {USER_POOL_GROUP_ADMINS} from "./constant";
+import {auth} from './auth/resource.js';
+import {data} from './data/resource.js';
+import {UserPool} from 'aws-cdk-lib/aws-cognito';
+import {UserPollGroup} from './custom/user-pool-group/resource';
+import {AuthTrigger} from './custom/auth-trigger/resource';
+import {Stack} from 'aws-cdk-lib';
+import {PolicyStatement, Role} from 'aws-cdk-lib/aws-iam';
+import {handlePublicStorage, storage} from './storage/resource';
+import {OpenSearchConfig} from './custom/open-search/resource';
 
 const backend = defineBackend({
-    auth,
-    data,
-    storage,
+	auth,
+	data,
+	storage,
 });
-
-
-const todoTable =
-    backend.data.resources.cfnResources.amplifyDynamoDbTables['Todo'];
-
-
-// Update table settings
-todoTable.pointInTimeRecoveryEnabled = true;
-
-
-todoTable.streamSpecification = {
-    streamViewType: dynamodb.StreamViewType.NEW_IMAGE
-};
-
-
-const personTable =
-    backend.data.resources.cfnResources.amplifyDynamoDbTables['Person']
-
-personTable.pointInTimeRecoveryEnabled = true;
-
-personTable.streamSpecification = {
-    streamViewType: dynamodb.StreamViewType.NEW_IMAGE
-};
-
-
-// Get the DynamoDB table ARN
-const tableArn = backend.data.resources.tables['Todo'].tableArn;
-// Get the DynamoDB table name
-const tableName = backend.data.resources.tables['Todo'].tableName;
-
-const personTableArn = backend.data.resources.tables['Person'].tableArn
-const personTableName = backend.data.resources.tables['Person'].tableName;
-
-const studentTableArn = backend.data.resources.tables['Student'].tableArn;
-const studentTableName = backend.data.resources.tables['Student'].tableName;
 
 const stack = Stack.of(backend.data);
 
-// Create the OpenSearch domain
-const openSearchDomain = new opensearch.Domain(
-    stack,
-    'OpenSearchDomain',
-    {
-        version: opensearch.EngineVersion.OPENSEARCH_2_11,
-        nodeToNodeEncryption: true,
-        encryptionAtRest: {
-            enabled: true
-        },
-    }
-);
-
-
-// Get the S3Bucket ARN
-const s3BucketArn = backend.storage.resources.bucket.bucketArn;
-// Get the S3Bucket Name
-const s3BucketName = backend.storage.resources.bucket.bucketName;
-
-
-// Create an IAM role for OpenSearch integration
-const openSearchIntegrationPipelineRole = new iam.Role(
-    stack,
-    "OpenSearchIntegrationPipelineRole",
-    {
-        assumedBy: new iam.ServicePrincipal("osis-pipelines.amazonaws.com"),
-        inlinePolicies: {
-            openSearchPipelinePolicy: new iam.PolicyDocument({
-                statements: [
-                    new iam.PolicyStatement({
-                        actions: ["es:DescribeDomain"],
-                        resources: [
-                            openSearchDomain.domainArn,
-                            openSearchDomain.domainArn + "/*",
-                        ],
-                        effect: iam.Effect.ALLOW,
-                    }),
-                    new iam.PolicyStatement({
-                        actions: ["es:ESHttp*"],
-                        resources: [
-                            openSearchDomain.domainArn,
-                            openSearchDomain.domainArn + "/*",
-                        ],
-                        effect: iam.Effect.ALLOW,
-                    }),
-                    new iam.PolicyStatement({
-                        effect: iam.Effect.ALLOW,
-                        actions: [
-                            "s3:GetObject",
-                            "s3:AbortMultipartUpload",
-                            "s3:PutObject",
-                            "s3:PutObjectAcl",
-                        ],
-                        resources: [s3BucketArn, s3BucketArn + "/*"],
-                    }),
-                    new iam.PolicyStatement({
-                        effect: iam.Effect.ALLOW,
-                        actions: [
-                            "dynamodb:DescribeTable",
-                            "dynamodb:DescribeContinuousBackups",
-                            "dynamodb:ExportTableToPointInTime",
-                            "dynamodb:DescribeExport",
-                            "dynamodb:DescribeStream",
-                            "dynamodb:GetRecords",
-                            "dynamodb:GetShardIterator",
-                        ],
-                        resources: [tableArn, tableArn + "/*", personTableArn, personTableArn + "/*", studentTableArn, studentTableArn+"/*"],
-                    }),
-                ],
-            }),
-        },
-        managedPolicies: [
-            iam.ManagedPolicy.fromAwsManagedPolicyName(
-                "AmazonOpenSearchIngestionFullAccess"
-            ),
-        ],
-    }
-);
-
-
-// Define OpenSearch index mappings
-const indexName = "todo";
-
-
-const indexMapping = {
-    settings: {
-        number_of_shards: 1,
-        number_of_replicas: 0,
-    },
-    mappings: {
-        properties: {
-            id: {
-                type: "keyword",
-            },
-            done: {
-                type: "boolean",
-            },
-            content: {
-                type: "text",
-            },
-        },
-    },
-};
-
-// OpenSearch template definition
-const openSearchTemplate = `
-version: "2"
-dynamodb-pipeline:
-  source:
-    dynamodb:
-      acknowledgments: true
-      tables:
-        - table_arn: "${tableArn}"
-          stream:
-            start_position: "LATEST"
-          export:
-            s3_bucket: "${s3BucketName}"
-            s3_region: "${stack.region}"
-            s3_prefix: "${tableName}/"
-      aws:
-        sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-        region: "${stack.region}"
-  sink:
-    - opensearch:
-        hosts:
-          - "https://${openSearchDomain.domainEndpoint}"
-        index: "${indexName}"
-        index_type: "custom"
-        template_content: |
-          ${JSON.stringify(indexMapping)}
-        document_id: '\${getMetadata("primary_key")}'
-        action: '\${getMetadata("opensearch_action")}'
-        document_version: '\${getMetadata("document_version")}'
-        document_version_type: "external"
-        bulk_size: 4
-        aws:
-          sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-          region: "${stack.region}"
-`;
-
-const personIndexName = "person"
-
-const personIndexMapping = {
-    settings: {
-        number_of_shards: 1,
-        number_of_replicas: 0,
-    },
-    mappings: {
-        properties: {
-            id: {
-                type: "keyword",
-            },
-            name: {
-                type: "text",
-            },
-            age: {
-                type: "integer"
-            }
-        },
-    },
+const ddbTable = backend.data.resources.tables['Todo'];
+backend.addOutput({
+	custom: {
+		Table: Object.entries(backend.data.resources.tables)
+			.map(([key, value]) => ({ [key]: value.tableName }))
+			.reduce((acc, cur) => ({ ...acc, ...cur }), {}),
+	},
+});
+const ddbDataSourceRoleArn = backend.data.resources.cfnResources.cfnDataSources['TodoTable'].serviceRoleArn;
+if (ddbDataSourceRoleArn) {
+	const ddbDataSourceRole = Role.fromRoleArn(stack, 'DynamoDBServiceRoleArn', ddbDataSourceRoleArn);
+	ddbDataSourceRole.addToPrincipalPolicy(
+		new PolicyStatement({
+			actions: ['dynamodb:BatchWriteItem'],
+			resources: [ddbTable.tableArn],
+		})
+	);
 }
 
-const personOpenSearchTemplate = `
-version: "2"
-dynamodb-pipeline:
-  source:
-    dynamodb:
-      acknowledgments: true
-      tables:
-        - table_arn: "${personTableArn}"
-          stream:
-            start_position: "LATEST"
-          export:
-            s3_bucket: "${s3BucketName}"
-            s3_region: "${stack.region}"
-            s3_prefix: "${personTableName}/"
-      aws:
-        sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-        region: "${stack.region}"
-  sink:
-    - opensearch:
-        hosts:
-          - "https://${openSearchDomain.domainEndpoint}"
-        index: "${personIndexName}"
-        index_type: "custom"
-        template_content: |
-          ${JSON.stringify(personIndexMapping)}
-        document_id: '\${getMetadata("primary_key")}'
-        action: '\${getMetadata("opensearch_action")}'
-        document_version: '\${getMetadata("document_version")}'
-        document_version_type: "external"
-        bulk_size: 4
-        aws:
-          sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-          region: "${stack.region}"
-`;
+const s3Bucket = backend.storage.resources.bucket;
 
-const studentIndexName = "student"
+handlePublicStorage(s3Bucket);
 
-const studentIndexMapping = {
-    settings: {
-        number_of_shards: 1,
-        number_of_replicas: 0,
-    },
-    mappings: {
-        properties: {
-            id: {
-                type: "keyword",
-            },
-            name: {
-                type: "text",
-            },
-            age: {
-                type: "integer"
-            }
-        },
-    },
-}
+const userPool = backend.auth.resources.userPool as UserPool;
 
-const studentOpenSearchTemplate = `
-version: "2"
-dynamodb-pipeline:
-  source:
-    dynamodb:
-      acknowledgments: true
-      tables:
-        - table_arn: "${studentTableArn}"
-          stream:
-            start_position: "LATEST"
-          export:
-            s3_bucket: "${s3BucketName}"
-            s3_region: "${stack.region}"
-            s3_prefix: "${studentTableName}/"
-      aws:
-        sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-        region: "${stack.region}"
-  sink:
-    - opensearch:
-        hosts:
-          - "https://${openSearchDomain.domainEndpoint}"
-        index: "${studentIndexName}"
-        index_type: "custom"
-        template_content: |
-          ${JSON.stringify(studentIndexMapping)}
-        document_id: '\${getMetadata("primary_key")}'
-        action: '\${getMetadata("opensearch_action")}'
-        document_version: '\${getMetadata("document_version")}'
-        document_version_type: "external"
-        bulk_size: 4
-        aws:
-          sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
-          region: "${stack.region}"
-`;
+// create auth trigger stack
+const authTriggerName = 'AuthTriggerStack';
+const authTriggerStack = backend.createStack(authTriggerName);
+new AuthTrigger(authTriggerStack, authTriggerName, { userPool: userPool });
 
-
-// Create a CloudWatch log group
-const logGroup = new logs.LogGroup(stack, "LogGroup", {
-    logGroupName: "/aws/vendedlogs/OpenSearchService/pipelines/2",
-    removalPolicy: RemovalPolicy.DESTROY,
+// create groups stack
+const authGroupsName = 'AuthGroupsStack';
+const groupsStack = backend.createStack(authGroupsName);
+new UserPollGroup(groupsStack, authGroupsName, {
+	userPool: userPool,
+	identityPoolId: backend.auth.resources.cfnResources.cfnIdentityPool.ref,
 });
 
-
-// Create an OpenSearch Integration Service pipeline
-const cfnPipeline = new osis.CfnPipeline(
-    stack,
-    "OpenSearchIntegrationPipeline",
-    {
-        maxUnits: 4,
-        minUnits: 1,
-        pipelineConfigurationBody: openSearchTemplate,
-        pipelineName: "dynamodb-integration-1",
-        logPublishingOptions: {
-            isLoggingEnabled: true,
-            cloudWatchLogDestination: {
-                logGroup: logGroup.logGroupName,
-            },
-        },
-    }
-);
-
-const personCfnPipeline = new osis.CfnPipeline(
-    stack,
-    "PersonOpenSearchIntegrationPipeline",
-    {
-        maxUnits: 4,
-        minUnits: 1,
-        pipelineConfigurationBody: personOpenSearchTemplate,
-        pipelineName: "dynamodb-integration-2",
-        logPublishingOptions: {
-            isLoggingEnabled: true,
-            cloudWatchLogDestination: {
-                logGroup: logGroup.logGroupName,
-            },
-        },
-    }
-);
-
-const studentCfnPipeline = new osis.CfnPipeline(
-    stack,
-    "studentOpenSearchIntegrationPipeline",
-    {
-        maxUnits: 4,
-        minUnits: 1,
-        pipelineConfigurationBody: studentOpenSearchTemplate,
-        pipelineName: "dynamodb-integration-3",
-        logPublishingOptions: {
-            isLoggingEnabled: true,
-            cloudWatchLogDestination: {
-                logGroup: logGroup.logGroupName,
-            },
-        },
-    }
-);
-
-// Add OpenSearch data source
-const osDataSource = backend.data.addOpenSearchDataSource(
-    "osDataSource",
-    openSearchDomain
-);
-
+// create the bucket and its stack
+// const publicBucketName = 'PublicBucketStack';
+// const bucketStack = backend.createStack(publicBucketName);
+// new PublicBucket(bucketStack, publicBucketName, {
+// 	resources: backend.auth.resources,
+// });
 
 // create the admin queries
-const todoQueriesName = 'todoQueries';
-const todoQueriesStack = backend.createStack(todoQueriesName);
-const todosApi = new TodosQueriesApi(todoQueriesStack, todoQueriesName, {
-    esArn: openSearchDomain.domainArn,
-    userPoolClients: [backend.auth.resources.userPoolClient],
-    allowGroups: [USER_POOL_GROUP_ADMINS],
+// const adminQueriesName = 'AdminQueries-test';
+// const adminQueriesStack = backend.createStack(adminQueriesName);
+// const adminApi = new AdminQueriesApi(adminQueriesStack, adminQueriesName, {
+// 	userPool,
+// 	userPoolClients: [backend.auth.resources.userPoolClient],
+// 	allowGroups: [USER_POOL_GROUP_ADMINS],
+// });
+
+const openSearchName = 'openSearch-test';
+const openSearchStack = backend.createStack(openSearchName);
+const openSearchConfig = new OpenSearchConfig(openSearchStack, openSearchName, {
+	stack,
+	data: backend.data,
+	s3Bucket: s3Bucket,
 });
 
+// const OPEN_SEARCH_DOMAIN_ID = 'es';
+// // Create the OpenSearch domain
+// const openSearchDomain = new opensearch.Domain(stack, OPEN_SEARCH_DOMAIN_ID, {
+// 	version: opensearch.EngineVersion.OPENSEARCH_2_11,
+// 	nodeToNodeEncryption: true,
+// 	encryptionAtRest: {
+// 		enabled: true,
+// 	},
+// });
+//
+// const newsTable = backend.data.resources.tables['News'];
+// const newsCfnTable = backend.data.resources.cfnResources.amplifyDynamoDbTables['News'];
+// const newsIndexName = indicesMap['News'].indexName;
+// const newsPipelineName = indicesMap['News'].alias;
+// const newsIndexMapping = indicesMap['News'].indexMapping;
+// newsCfnTable.pointInTimeRecoveryEnabled = true;
+//
+// newsCfnTable.streamSpecification = {
+// 	streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
+// };
+//
+// const articleTable = backend.data.resources.tables['Article'];
+// const articleCfnTable = backend.data.resources.cfnResources.amplifyDynamoDbTables['Article'];
+// const articleIndexName = indicesMap['Article'].indexName;
+// const articlePipelineName = indicesMap['Article'].alias;
+// const articleIndexMapping = indicesMap['Article'].indexMapping;
+// articleCfnTable.pointInTimeRecoveryEnabled = true;
+//
+// articleCfnTable.streamSpecification = {
+// 	streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
+// };
+//
+// const OPEN_SEARCH_INTEGRATION_PIPELINE_ROLE_ID = 'esIntegrationPipelineRole';
+// const openSearchIntegrationPipelineRole = new iam.Role(stack, OPEN_SEARCH_INTEGRATION_PIPELINE_ROLE_ID, {
+// 	assumedBy: new iam.ServicePrincipal('osis-pipelines.amazonaws.com'),
+// 	inlinePolicies: {
+// 		openSearchPipelinePolicy: new iam.PolicyDocument({
+// 			statements: [
+// 				new iam.PolicyStatement({
+// 					actions: ['es:DescribeDomain'],
+// 					resources: [openSearchDomain.domainArn, openSearchDomain.domainArn + '/*'],
+// 					effect: iam.Effect.ALLOW,
+// 				}),
+// 				new iam.PolicyStatement({
+// 					actions: ['es:ESHttp*'],
+// 					resources: [openSearchDomain.domainArn, openSearchDomain.domainArn + '/*'],
+// 					effect: iam.Effect.ALLOW,
+// 				}),
+// 				new iam.PolicyStatement({
+// 					effect: iam.Effect.ALLOW,
+// 					actions: ['s3:GetObject', 's3:AbortMultipartUpload', 's3:PutObject', 's3:PutObjectAcl'],
+// 					resources: [s3Bucket.bucketArn, s3Bucket.bucketArn + '/*'],
+// 				}),
+// 				new iam.PolicyStatement({
+// 					effect: iam.Effect.ALLOW,
+// 					actions: [
+// 						'dynamodb:DescribeTable',
+// 						'dynamodb:DescribeContinuousBackups',
+// 						'dynamodb:ExportTableToPointInTime',
+// 						'dynamodb:DescribeExport',
+// 						'dynamodb:DescribeStream',
+// 						'dynamodb:GetRecords',
+// 						'dynamodb:GetShardIterator',
+// 					],
+// 					resources: [
+// 						newsTable.tableArn,
+// 						newsTable.tableArn + '/*',
+// 						articleTable.tableArn,
+// 						articleTable.tableArn + '/*',
+// 					],
+// 				}),
+// 			],
+// 		}),
+// 	},
+// 	managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonOpenSearchIngestionFullAccess')],
+// });
+//
+// const LOG_GROUP_ID = 'LogGroup-es';
+// // Create a CloudWatch log group
+// const logGroup = new logs.LogGroup(stack, LOG_GROUP_ID, {
+// 	logGroupName: `/aws/vendedlogs/OpenSearchService/pipelines/${openSearchDomain.domainName}`,
+// 	removalPolicy: RemovalPolicy.DESTROY,
+// });
+//
+// const newsOpenSearchTemplate = `
+// version: "2"
+// dynamodb-pipeline:
+//   source:
+//     dynamodb:
+//       acknowledgments: true
+//       tables:
+//         - table_arn: "${newsTable.tableArn}"
+//           stream:
+//             start_position: "LATEST"
+//           export:
+//             s3_bucket: "${s3Bucket.bucketName}"
+//             s3_region: "${stack.region}"
+//             s3_prefix: "${newsTable.tableName}/"
+//       aws:
+//         sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+//         region: "${stack.region}"
+//   sink:
+//     - opensearch:
+//         hosts:
+//           - "https://${openSearchDomain.domainEndpoint}"
+//         index: "${newsIndexName}"
+//         index_type: "custom"
+//         template_content: |
+//           ${JSON.stringify(newsIndexMapping)}
+//         document_id: '\${getMetadata("primary_key")}'
+//         action: '\${getMetadata("opensearch_action")}'
+//         document_version: '\${getMetadata("document_version")}'
+//         document_version_type: "external"
+//         bulk_size: 4
+//         aws:
+//           sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+//           region: "${stack.region}"
+// `;
+//
+// // Create an OpenSearch Integration Service pipeline
+// new osis.CfnPipeline(stack, `cfnPipeline-News`, {
+// 	maxUnits: 4,
+// 	minUnits: 1,
+// 	pipelineConfigurationBody: newsOpenSearchTemplate,
+// 	pipelineName: `${newsPipelineName}-${openSearchDomain.domainName}`,
+// 	logPublishingOptions: {
+// 		isLoggingEnabled: true,
+// 		cloudWatchLogDestination: {
+// 			logGroup: logGroup.logGroupName,
+// 		},
+// 	},
+// });
+//
+// const articleOpenSearchTemplate = `
+// version: "2"
+// dynamodb-pipeline:
+//   source:
+//     dynamodb:
+//       acknowledgments: true
+//       tables:
+//         - table_arn: "${articleTable.tableArn}"
+//           stream:
+//             start_position: "LATEST"
+//           export:
+//             s3_bucket: "${s3Bucket.bucketName}"
+//             s3_region: "${stack.region}"
+//             s3_prefix: "${articleTable.tableName}/"
+//       aws:
+//         sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+//         region: "${stack.region}"
+//   sink:
+//     - opensearch:
+//         hosts:
+//           - "https://${openSearchDomain.domainEndpoint}"
+//         index: "${articleIndexName}"
+//         index_type: "custom"
+//         template_content: |
+//           ${JSON.stringify(articleIndexMapping)}
+//         document_id: '\${getMetadata("primary_key")}'
+//         action: '\${getMetadata("opensearch_action")}'
+//         document_version: '\${getMetadata("document_version")}'
+//         document_version_type: "external"
+//         bulk_size: 4
+//         aws:
+//           sts_role_arn: "${openSearchIntegrationPipelineRole.roleArn}"
+//           region: "${stack.region}"
+// `;
+//
+// // Create an OpenSearch Integration Service pipeline
+// new osis.CfnPipeline(stack, `cfnPipeline-Article`, {
+// 	maxUnits: 4,
+// 	minUnits: 1,
+// 	pipelineConfigurationBody: articleOpenSearchTemplate,
+// 	pipelineName: `${articlePipelineName}-${openSearchDomain.domainName}`,
+// 	logPublishingOptions: {
+// 		isLoggingEnabled: true,
+// 		cloudWatchLogDestination: {
+// 			logGroup: logGroup.logGroupName,
+// 		},
+// 	},
+// });
+//
+// const ES_DATA_SOURCE_ID = 'esDataSource1';
+// const openSearchDataSource = backend.data.addOpenSearchDataSource(ES_DATA_SOURCE_ID, openSearchDomain);
+
 backend.addOutput({
-    custom: {
-        API: {
-            [todoQueriesName]: {
-                endpoint: todosApi.url,
-            },
-        },
-        es: {
-            endpoint: openSearchDomain.domainEndpoint,
-            arn: openSearchDomain.domainArn
-        }
-    }
-})
-
-
+	custom: {
+		S3: {
+			endpoint: s3Bucket.bucketRegionalDomainName,
+		},
+		es: {
+			domainArn: openSearchConfig.openSearchDomain.domainArn,
+			domainId: openSearchConfig.openSearchDomain.domainId,
+			domainName: openSearchConfig.openSearchDomain.domainName,
+			stackId: openSearchConfig.openSearchDomain.stack.stackId,
+			stackName: openSearchConfig.openSearchDomain.stack.stackName,
+		},
+	},
+});

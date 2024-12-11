@@ -1,7 +1,8 @@
-import { create, type, string } from 'superstruct';
+import { create, coerce, type, string, array } from 'superstruct';
 
 export const ProcessEnv = type({
-	ES_HOST: string(),
+	COGNITO_USER_POOL_ID: string(),
+	ALLOWED_GROUPS: coerce(array(string()), string(), (value) => JSON.parse(value)),
 });
 
 // error early if env vars are not set
